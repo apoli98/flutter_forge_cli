@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:flutter_forge_cli/src/project/names.dart';
 import 'package:flutter_forge_cli/src/project/project_config.dart';
 import 'package:flutter_forge_cli/src/toolchain/flutter_toolchain.dart';
 import 'package:path/path.dart' as p;
@@ -19,11 +18,7 @@ void writeFile(String root, String path, String contents) {
 }
 
 void writeProject(String root) {
-  writeFile(
-    root,
-    configFileName,
-    ProjectConfig(DartName.parse('demo')).encode(),
-  );
+  writeFile(root, configFileName, 'schema_version: 1\npackage: demo\n');
   writeFile(root, 'pubspec.yaml', '''name: demo
 dependencies:
   flutter:
@@ -33,6 +28,9 @@ dependencies:
   material_ui: ^1.11.0
 dev_dependencies:
   bloc_test: ^10.0.0
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
 ''');
 }
 

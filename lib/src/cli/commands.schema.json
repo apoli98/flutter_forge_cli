@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Flutter Forge command definitions",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "commonOptions", "commands"],
+  "properties": {
+    "$schema": {"type": "string", "minLength": 1},
+    "commonOptions": {"type": "array", "items": {"$ref": "#/$defs/option"}},
+    "commands": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/command"}}
+  },
+  "$defs": {
+    "name": {"type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"},
+    "option": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type"],
+      "properties": {
+        "name": {"$ref": "#/$defs/name"},
+        "type": {"enum": ["string", "boolean"]},
+        "abbr": {"type": "string", "pattern": "^[a-zA-Z0-9]$"},
+        "help": {"type": "string", "minLength": 1},
+        "default": {"type": ["string", "boolean"]},
+        "allowed": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "negatable": {"type": "boolean"}
+      },
+      "if": {"properties": {"type": {"const": "boolean"}}},
+      "then": {"properties": {"default": {"type": "boolean"}}, "not": {"required": ["allowed"]}},
+      "else": {"properties": {"default": {"type": "string"}}, "not": {"required": ["negatable"]}}
+    },
+    "positional": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "required", "help"],
+      "properties": {
+        "name": {"$ref": "#/$defs/name"},
+        "required": {"type": "boolean"},
+        "help": {"type": "string", "minLength": 1}
+      }
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "help", "positionals", "options"],
+      "properties": {
+        "name": {"$ref": "#/$defs/name"},
+        "help": {"type": "string", "minLength": 1},
+        "positionals": {"type": "array", "items": {"$ref": "#/$defs/positional"}},
+        "options": {"type": "array", "items": {"$ref": "#/$defs/option"}}
+      }
+    }
+  }
+}

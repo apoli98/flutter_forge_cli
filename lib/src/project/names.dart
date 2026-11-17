@@ -1,4 +1,5 @@
 import 'app_dependencies.dart';
+import 'profiles.dart';
 
 final _namePattern = RegExp(r'^[a-z][a-z0-9]*(?:_[a-z][a-z0-9]*)*$');
 
@@ -96,9 +97,30 @@ final class DartName {
       .join();
 }
 
-void validateAppName(DartName name) {
-  if (appDependencies.containsKey(name.value) ||
-      appDevDependencies.containsKey(name.value)) {
+void validateAppName(
+  DartName name, {
+  Recipe recipe = Recipe.clean,
+  LintProfile profile = LintProfile.veryGood,
+  StateStyle state = StateStyle.cubit,
+  bool infrastructure = false,
+}) {
+  // flutter_riverpod pins riverpod itself. The app cannot satisfy that package.
+  if (state == StateStyle.riverpod && name.value == 'riverpod') {
+    throw const FormatException(
+      'App name "riverpod" conflicts with a required transitive dependency of '
+      'flutter_riverpod. Choose a different package name.',
+    );
+  }
+  if (dependenciesFor(
+        recipe,
+        state: state,
+        infrastructure: infrastructure,
+      ).containsKey(name.value) ||
+      devDependenciesFor(
+        profile,
+        state: state,
+        infrastructure: infrastructure,
+      ).containsKey(name.value)) {
     throw FormatException(
       'App name "${name.value}" conflicts with a bundled direct dependency. '
       'Choose a different package name.',

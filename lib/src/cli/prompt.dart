@@ -7,8 +7,12 @@ import 'package:path/path.dart' as p;
 
 import '../generation/generation_plan.dart';
 import '../project/names.dart';
+import '../project/app_dependencies.dart';
+import '../project/profiles.dart';
 import '../project/project_config.dart';
+import '../project/route_path.dart';
 import 'options.dart';
+import 'command_definitions.dart';
 
 /// Injectable terminal capability and asynchronous line input. No raw mode.
 final class PromptInput {
@@ -52,23 +56,44 @@ Future<CommandOptions> collectOptions(
   final prompt = _Prompt(input, out);
   final parsed = args.command;
   final command =
-      parsed?.name ?? await prompt.choose('Command', ['create', 'feature']);
+      parsed?.name ??
+      await prompt.choose('Command', cliCommands.commands.keys.toList());
+  final parserOptions = cliParser().commands[command]!.options;
+  String defaultValue(String flag) => parserOptions[flag]!.defaultsTo as String;
+  List<String> choices(String flag) {
+    final option = parserOptions[flag]!;
+    return [
+      if (option.defaultsTo != null) option.defaultsTo as String,
+      ...option.allowed!.where((value) => value != option.defaultsTo),
+    ];
+  }
+
   final suppliedName = parsed?.rest.singleOrNull;
   DartName checkName(String value) {
     final name = DartName.parse(value);
-    if (command == 'create') validateAppName(name);
+    if (command == 'create') {
+      // Backend and profile dependencies are checked once all choices resolve.
+      if (appDependencies.containsKey(value) ||
+          appDevDependencies.containsKey(value)) {
+        throw FormatException(
+          'App name "$value" conflicts with a bundled direct dependency. Choose a different package name.',
+        );
+      }
+    }
     return name;
   }
 
-  final name = suppliedName ?? await prompt.value('Name', validate: checkName);
-  checkName(name);
+  var name = command == 'init'
+      ? ''
+      : suppliedName ?? await prompt.value('Name', validate: checkName);
+  if (command != 'init') checkName(name);
 
   Future<String> option(
     String flag,
     String label,
-    String fallback,
     void Function(String) validate,
   ) async {
+    final fallback = defaultValue(flag);
     if (parsed?.wasParsed(flag) == true || !interactive) {
       final value = parsed?.option(flag) ?? fallback;
       validate(value);
@@ -78,23 +103,24 @@ Future<CommandOptions> collectOptions(
   }
 
   final dryRun = commonFlag(args, 'dry-run');
+  Future<String?> profile(String flag) async {
+    if (parsed?.wasParsed(flag) == true) return parsed!.option(flag);
+    if (interactive && command != 'feature') {
+      return prompt.choose(flag, choices(flag));
+    }
+    return parsed?.option(flag);
+  }
+
+  // Resolve profiles after basic paths/options so explicit invalid paths fail first.
   late CommandOptions result;
   if (command == 'create') {
-    final org = await option(
-      'org',
-      'Organization',
-      'com.example',
-      validateOrganization,
-    );
+    final org = await option('org', 'Organization', validateOrganization);
     final platforms = await option(
       'platforms',
       'Platforms (comma-separated)',
-      'ios,android',
       parsePlatforms,
     );
-    final output = await option('output', 'Existing output parent', '.', (
-      value,
-    ) {
+    final output = await option('output', 'Existing output parent', (value) {
       final path = p.normalize(p.join(cwd, value));
       if (!Directory(path).existsSync()) {
         throw FileSystemException(
@@ -103,9 +129,32 @@ Future<CommandOptions> collectOptions(
         );
       }
     });
+    final defaultPub = parserOptions['pub']!.defaultsTo as bool;
     final pub = interactive && parsed?.wasParsed('pub') != true
-        ? await prompt.choose('Fetch dependencies', ['yes', 'no']) == 'yes'
-        : parsed?.flag('pub') ?? true;
+        ? await prompt.choose('Fetch dependencies', [
+                if (defaultPub) ...['yes', 'no'] else ...['no', 'yes'],
+              ]) ==
+              'yes'
+        : parsed?.flag('pub') ?? defaultPub;
+    final state = await profile('state');
+    final recipe = await profile('recipe');
+    final lintProfile = await profile('lint-profile');
+    void checkResolvedName(String value) => validateAppName(
+      DartName.parse(value),
+      recipe: Recipe.values.byName(recipe ?? 'clean'),
+      state: StateStyle.values.byName(state ?? 'cubit'),
+      profile: lintProfile == null || lintProfile == 'auto'
+          ? LintProfile.veryGood
+          : parseLintProfile(lintProfile),
+      infrastructure: true,
+    );
+    try {
+      checkResolvedName(name);
+    } on FormatException catch (e) {
+      if (!interactive || suppliedName != null) rethrow;
+      out.writeln('Invalid input: ${e.message}');
+      name = await prompt.value('Name', validate: checkResolvedName);
+    }
     result = CommandOptions(
       command: command,
       name: name,
@@ -114,34 +163,59 @@ Future<CommandOptions> collectOptions(
       platforms: platforms,
       output: output,
       pub: pub,
+      state: state,
+      recipe: recipe,
+      lintProfile: lintProfile,
     );
   } else {
     final projectDir = await option(
       'project-dir',
       'Flutter Forge project directory',
-      '.',
       (value) {
-        ProjectConfig.read(canonicalRoot(p.join(cwd, value)));
+        final root = canonicalRoot(p.join(cwd, value));
+        if (command == 'init') {
+          ProjectConfig.readPackage(root);
+        } else {
+          ProjectConfig.read(root);
+        }
       },
     );
+    final inheritedState = command == 'feature'
+        ? ProjectConfig.read(canonicalRoot(p.join(cwd, projectDir))).state
+        : StateStyle.cubit;
     final state = interactive && parsed?.wasParsed('state') != true
-        ? await prompt.choose('State management', ['cubit', 'bloc'])
-        : parsed!.option('state')!;
+        ? await prompt.choose('State management', [
+            inheritedState.name,
+            ...choices('state').where((state) => state != inheritedState.name),
+          ])
+        : parsed?.option('state');
+    final route = command == 'feature' ? parsed?.option('route') : null;
+    if (route != null) RoutePath.parse(route);
     result = CommandOptions(
       command: command,
       name: name,
       dryRun: dryRun,
       projectDir: projectDir,
       state: state,
+      recipe: await profile('recipe'),
+      lintProfile: await profile('lint-profile'),
+      route: route,
+      scaffold: command == 'init' && (parsed?.flag('scaffold') ?? false),
+      pub: parsed?.flag('pub') ?? parserOptions['pub']!.defaultsTo as bool,
     );
   }
   if (interactive) {
     String quote(String value) => "'${value.replaceAll("'", "'\\''")}'";
     final options = command == 'create'
         ? '--org ${quote(result.org)} --platforms ${quote(result.platforms)} --output ${quote(p.normalize(p.join(cwd, result.output)))} ${result.pub ? '--pub' : '--no-pub'}'
-        : '--project-dir ${quote(p.normalize(p.join(cwd, result.projectDir)))} --state ${result.state}';
+        : '--project-dir ${quote(p.normalize(p.join(cwd, result.projectDir)))}${result.scaffold ? ' --scaffold' : ''}${command == 'feature' || result.scaffold ? (result.pub ? ' --pub' : ' --no-pub') : ''}';
+    final profiles =
+        '${result.state == null ? '' : ' --state ${result.state}'}'
+        '${result.recipe == null ? '' : ' --recipe ${result.recipe}'}'
+        '${result.lintProfile == null ? '' : ' --lint-profile ${result.lintProfile}'}'
+        '${result.route == null ? '' : ' --route ${quote(result.route!)}'}';
     out.writeln(
-      'Resolved command:\nflutter-forge $command $name $options${dryRun ? ' --dry-run' : ''}',
+      'Resolved command:\nflutter-forge $command${name.isEmpty ? '' : ' $name'} $options$profiles${dryRun ? ' --dry-run' : ''}',
     );
     if (await prompt.choose('Proceed', ['no', 'yes']) != 'yes') {
       throw const PromptCancelled();

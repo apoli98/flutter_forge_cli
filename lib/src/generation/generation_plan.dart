@@ -46,9 +46,41 @@ final class FileWriter {
     'lib/main.dart',
     'pubspec.yaml',
     'test/widget_test.dart',
+    'analysis_options.yaml',
   };
 
   void check(String root, GenerationPlan plan) => _check(root, plan, const {});
+
+  /// Validate every owned replacement and every new path before any write.
+  /// Expected contents come from the typed registry renderer, not path metadata.
+  void checkManaged(
+    String root,
+    GenerationPlan plan,
+    Map<String, String> expected,
+  ) {
+    if (expected.keys.any((path) => !plan.files.containsKey(path))) {
+      throw ArgumentError('Every managed replacement must be in the plan.');
+    }
+    _check(root, plan, expected.keys.toSet());
+    for (final entry in expected.entries) {
+      final file = File(p.join(canonicalRoot(root), entry.key));
+      if (!file.existsSync() || file.readAsStringSync() != entry.value) {
+        throw FileSystemException(
+          'Forge-managed file is missing or edited; refusing all writes. Restore its generated contents or register manually',
+          file.path,
+        );
+      }
+    }
+  }
+
+  void writeManaged(
+    String root,
+    GenerationPlan plan,
+    Map<String, String> expected,
+  ) {
+    checkManaged(root, plan, expected);
+    _write(root, plan, expected.keys.toSet());
+  }
 
   void _check(String root, GenerationPlan plan, Set<String> replacements) {
     final absoluteRoot = canonicalRoot(root);

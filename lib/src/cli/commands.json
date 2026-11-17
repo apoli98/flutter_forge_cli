@@ -1,0 +1,58 @@
+{
+  "$schema": "commands.schema.json",
+  "commonOptions": [
+    {"name": "help", "type": "boolean", "abbr": "h", "negatable": false, "help": "Show usage."},
+    {"name": "version", "type": "boolean", "negatable": false, "help": "Show CLI version."},
+    {"name": "schema", "type": "boolean", "negatable": false, "help": "Show the JSON Schema for command invocations."},
+    {"name": "interactive", "type": "boolean", "negatable": false, "help": "Collect omitted values in a terminal wizard; --no-interactive disables prompts."},
+    {"name": "no-interactive", "type": "boolean", "negatable": false, "help": "Never prompt for input."},
+    {"name": "json", "type": "boolean", "negatable": false, "help": "Emit one structured JSON result; never prompt."},
+    {"name": "dry-run", "type": "boolean", "negatable": false, "help": "Validate and preview without writes or processes."}
+  ],
+  "commands": [
+    {
+      "name": "create",
+      "help": "Create a new app in an absent directory.",
+      "positionals": [
+        {"name": "name", "required": true, "help": "Positional Dart name; semantic checks run in the CLI."}
+      ],
+      "options": [
+        {"name": "recipe", "type": "string", "allowed": ["clean", "counter"], "default": "clean"},
+        {"name": "lint-profile", "type": "string", "allowed": ["auto", "flutter", "very_good"], "default": "auto"},
+        {"name": "state", "type": "string", "allowed": ["cubit", "bloc", "riverpod", "provider"], "help": "State management; features inherit the project default."},
+        {"name": "org", "type": "string", "default": "com.example", "help": "Reverse-domain organization."},
+        {"name": "platforms", "type": "string", "default": "ios,android", "help": "Comma-separated Flutter platforms."},
+        {"name": "output", "type": "string", "default": ".", "help": "Existing parent directory of the new app."},
+        {"name": "pub", "type": "boolean", "default": true, "help": "Run dependency resolution, localizations, and code generation."}
+      ]
+    },
+    {
+      "name": "feature",
+      "help": "Generate a feature; safely register in managed apps.",
+      "positionals": [
+        {"name": "name", "required": true, "help": "Positional Dart name; semantic checks run in the CLI."}
+      ],
+      "options": [
+        {"name": "recipe", "type": "string", "allowed": ["clean", "counter"]},
+        {"name": "lint-profile", "type": "string", "allowed": ["auto", "flutter", "very_good"]},
+        {"name": "state", "type": "string", "allowed": ["cubit", "bloc", "riverpod", "provider"], "help": "State management; features inherit the project default."},
+        {"name": "pub", "type": "boolean", "default": true, "help": "Run dependency resolution and code generation for managed projects."},
+        {"name": "project-dir", "type": "string", "default": ".", "help": "Flutter Forge project directory."},
+        {"name": "route", "type": "string", "help": "Static absolute route location."}
+      ]
+    },
+    {
+      "name": "init",
+      "help": "Adopt metadata, or opt in with --scaffold.",
+      "positionals": [],
+      "options": [
+        {"name": "recipe", "type": "string", "allowed": ["clean", "counter"], "default": "clean"},
+        {"name": "lint-profile", "type": "string", "allowed": ["auto", "flutter", "very_good"], "default": "auto"},
+        {"name": "state", "type": "string", "allowed": ["cubit", "bloc", "riverpod", "provider"], "help": "State management; features inherit the project default."},
+        {"name": "project-dir", "type": "string", "default": ".", "help": "Existing Flutter app."},
+        {"name": "scaffold", "type": "boolean", "negatable": false, "help": "Add a full managed scaffold without replacing existing source. Dependencies and Flutter generation/assets settings must already be declared."},
+        {"name": "pub", "type": "boolean", "default": true, "help": "Run dependency resolution and code generation with --scaffold."}
+      ]
+    }
+  ]
+}

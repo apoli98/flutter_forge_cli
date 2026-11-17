@@ -52,9 +52,8 @@ void main() {
       () => writer.check(temp.path, GenerationPlan({'parent/child': ''})),
       throwsA(isA<FileSystemException>()),
     );
-    Directory(
-      p.join(temp.path, 'lib/features/orders'),
-    ).createSync(recursive: true);
+    Directory(p.join(temp.path, 'lib/features/orders'))
+        .createSync(recursive: true);
     expect(
       () => writer.write(
         temp.path,
@@ -74,6 +73,40 @@ void main() {
     writer.write(root, plan);
     expect(snapshot(root), {'a/b.dart': 'hello', 'c': 'world'});
     expect(() => writer.write(root, plan), throwsA(isA<FileSystemException>()));
+  });
+
+  test('managed replacements compare every expected file before any write', () {
+    writeFile(temp.path, 'owned.dart', 'generated');
+    writeFile(temp.path, 'other.dart', 'edited');
+    final before = snapshot(temp.path);
+    final plan = GenerationPlan({
+      'new.dart': 'new',
+      'owned.dart': 'next',
+      'other.dart': 'next',
+    });
+    expect(
+      () => writer.writeManaged(temp.path, plan, {
+        'owned.dart': 'generated',
+        'other.dart': 'generated',
+      }),
+      throwsA(isA<FileSystemException>()),
+    );
+    expect(snapshot(temp.path), before);
+    writer.writeManaged(temp.path, plan, {
+      'owned.dart': 'generated',
+      'other.dart': 'edited',
+    });
+    expect(snapshot(temp.path), {
+      'new.dart': 'new',
+      'owned.dart': 'next',
+      'other.dart': 'next',
+    });
+    expect(
+      () => writer.checkManaged(temp.path, GenerationPlan({}), {
+        'outside.dart': 'x',
+      }),
+      throwsArgumentError,
+    );
   });
 
   test('fresh overlay is limited and preflights unknown collisions', () {
@@ -101,9 +134,8 @@ void main() {
       writer.write(alias.path, GenerationPlan({'safe': 'ok'}));
       expect(File(p.join(real.path, 'safe')).readAsStringSync(), 'ok');
       Link(p.join(real.path, 'escape')).createSync(temp.path);
-      Link(
-        p.join(real.path, 'dangling'),
-      ).createSync(p.join(temp.path, 'missing'));
+      Link(p.join(real.path, 'dangling'))
+          .createSync(p.join(temp.path, 'missing'));
       for (final path in ['escape/out', 'dangling/out', 'escape']) {
         expect(
           () => writer.write(real.path, GenerationPlan({path: 'unsafe'})),

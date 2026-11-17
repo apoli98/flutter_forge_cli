@@ -52,7 +52,10 @@ void main() {
   tearDown(() => temp.deleteSync(recursive: true));
 
   test('TTY no-args chooser collects create defaults and confirms', () async {
-    expect(await run([], answers: ['', 'demo', '', '', '', '2', 'yes']), 0);
+    expect(
+      await run([], answers: ['', 'demo', '', '', '', '2', '', '', '', 'yes']),
+      0,
+    );
     expect(flutter.calls, hasLength(1));
     expect(out.toString(), contains('Resolved command:'));
     expect(out.toString(), contains('--no-pub'));
@@ -86,13 +89,18 @@ void main() {
           temp.path,
           '--no-pub',
         ],
-        answers: ['demo', '2'],
+        answers: ['demo', '', '', '', '2'],
       ),
       0,
     );
-    expect(reads, 2);
+    expect(reads, 5);
     expect(out.toString(), contains('--org \'dev.acme\' --platforms \'web\''));
-    expect(out.toString(), contains('--no-pub --dry-run'));
+    expect(
+      out.toString(),
+      contains(
+        '--no-pub --state cubit --recipe clean --lint-profile auto --dry-run',
+      ),
+    );
     expect(flutter.calls, isEmpty);
     expect(temp.listSync(), isEmpty);
   });
@@ -127,12 +135,12 @@ void main() {
     expect(
       await run(
         ['create', 'demo', '--interactive', '--dry-run'],
-        answers: ['dev.acme', 'web', '', 'no', 'yes'],
+        answers: ['dev.acme', 'web', '', 'no', '', '', '', 'yes'],
       ),
       0,
     );
-    expect(reads, 5);
-    expect(out.toString(), contains('--org dev.acme --platforms web'));
+    expect(reads, 8);
+    expect(out.toString(), contains("--org 'dev.acme' --platforms 'web'"));
     expect(flutter.calls, isEmpty);
   });
 
@@ -143,7 +151,7 @@ void main() {
         answers: [
           'class',
           'order_1',
-          'flutter_bloc',
+          'go_router',
           'demo',
           'invalid',
           'dev.acme',
@@ -154,6 +162,9 @@ void main() {
           '',
           'bogus',
           '2',
+          '',
+          '',
+          '',
           'yes',
         ],
       ),
@@ -178,7 +189,7 @@ void main() {
           'go_router',
           'missing',
           '',
-          'provider',
+          'invalid',
           'bloc',
           'yes',
         ],
@@ -186,7 +197,10 @@ void main() {
       0,
     );
     expect(out.toString(), contains('not a Flutter Forge project'));
-    expect(out.toString(), contains('Choose 1-2 (cubit, bloc)'));
+    expect(
+      out.toString(),
+      contains('Choose 1-4 (cubit, bloc, riverpod, provider)'),
+    );
     expect(out.toString(), contains('createGoRouterBloc: GoRouterBloc.new'));
     expect(flutter.calls, isEmpty);
   });
@@ -194,8 +208,8 @@ void main() {
   for (final answers in [
     <String>[],
     ['demo'],
-    ['demo', '', '', '', '', 'no'],
-    ['demo', '', '', '', '', ''],
+    ['demo', '', '', '', '', '', '', '', 'no'],
+    ['demo', '', '', '', '', '', '', '', ''],
     ['demo', '', '', '', ''],
   ]) {
     test('EOF or decline cancels without side effects: $answers', () async {
@@ -229,6 +243,118 @@ void main() {
     expect(await run(['feature', 'orders', '--dry-run']), 0);
     expect(reads, 0);
   });
+
+  for (final selection in [
+    (name: 'fpdart', recipe: 'clean', lint: 'auto'),
+    (name: 'very_good_analysis', recipe: 'counter', lint: 'very_good'),
+  ]) {
+    test(
+      'wizard retries ${selection.name} after profiles resolve before confirmation',
+      () async {
+        expect(
+          await run(
+            [
+              'create',
+              '--org',
+              'dev.acme',
+              '--platforms',
+              'web',
+              '--output',
+              '.',
+              '--no-pub',
+              '--dry-run',
+            ],
+            answers: [
+              selection.name,
+              'cubit',
+              selection.recipe,
+              selection.lint,
+              'valid_app',
+              'yes',
+            ],
+          ),
+          0,
+        );
+        expect(reads, 6);
+        expect(
+          out.toString(),
+          contains('Invalid input: App name "${selection.name}" conflicts'),
+        );
+        expect(out.toString(), contains('flutter-forge create valid_app'));
+        expect(
+          out.toString().indexOf('Invalid input:'),
+          lessThan(out.toString().indexOf('Proceed:')),
+        );
+        expect(
+          out.toString(),
+          isNot(contains('flutter-forge create ${selection.name}')),
+        );
+        expect(temp.listSync(), isEmpty);
+        expect(flutter.calls, isEmpty);
+      },
+    );
+
+    test(
+      'explicit ${selection.name} fails after profiles resolve without confirmation',
+      () async {
+        expect(
+          await run(
+            [
+              'create',
+              selection.name,
+              '--interactive',
+              '--org',
+              'dev.acme',
+              '--platforms',
+              'web',
+              '--output',
+              '.',
+              '--no-pub',
+            ],
+            answers: ['cubit', selection.recipe, selection.lint],
+          ),
+          64,
+        );
+        expect(reads, 3);
+        expect(
+          err.toString(),
+          contains('App name "${selection.name}" conflicts'),
+        );
+        expect(out.toString(), isNot(contains('Proceed:')));
+        expect(out.toString(), isNot(contains('Resolved command:')));
+        expect(temp.listSync(), isEmpty);
+        expect(flutter.calls, isEmpty);
+      },
+    );
+  }
+
+  test(
+    'wizard accepts optional dependency name when exact profiles do not use it',
+    () async {
+      expect(
+        await run(
+          [
+            'create',
+            '--org',
+            'dev.acme',
+            '--platforms',
+            'web',
+            '--output',
+            '.',
+            '--no-pub',
+            '--dry-run',
+          ],
+          answers: ['fpdart', 'cubit', 'counter', 'flutter', 'yes'],
+        ),
+        0,
+      );
+      expect(reads, 5);
+      expect(out.toString(), contains('flutter-forge create fpdart'));
+      expect(out.toString(), isNot(contains('Invalid input:')));
+      expect(temp.listSync(), isEmpty);
+      expect(flutter.calls, isEmpty);
+    },
+  );
 
   test('nonTTY and CI missing names fail immediately', () async {
     for (final command in ['create', 'feature']) {
@@ -307,7 +433,7 @@ void main() {
       ['--interactive', 'unknown'],
       ['create', '--wat'],
       ['--interactive', 'create', 'one', 'two'],
-      ['create', '--state', 'bloc'],
+      ['create', '--state', 'invalid'],
     ]) {
       expect(await run(args), 64);
     }

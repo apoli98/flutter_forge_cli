@@ -1,17 +1,29 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/args.dart';
 import 'package:path/path.dart' as p;
 
 import '../generation/generation_plan.dart';
+import '../generation/codegen_preflight.dart';
 import '../project/names.dart';
+import '../project/managed_feature.dart';
+import '../project/dependency_check.dart';
+import '../project/profiles.dart';
 import '../project/project_config.dart';
+import '../project/route_path.dart';
 import '../templates/app_templates.dart';
 import '../templates/feature_templates.dart';
+import '../templates/managed_feature_templates.dart';
+import '../templates/managed_integration_templates.dart';
 import '../toolchain/flutter_toolchain.dart';
 import 'options.dart';
+import 'command_definitions.dart';
+import 'invocation_schema.dart';
+import 'init_command.dart';
 import 'prompt.dart';
 import 'reporter.dart';
+import 'code_generation.dart';
 
 const version = '0.1.0';
 
@@ -46,12 +58,22 @@ Future<int> runCli(
       return reporter.finish();
     }
     final command = args.command;
+    final definition = cliCommands.commands[command?.name];
     if (commonFlag(args, 'help')) {
       _help(reporter, parser, command?.name);
       return reporter.finish();
     }
-    if (args.rest.isNotEmpty || (command?.rest.length ?? 0) > 1) {
-      throw const FormatException('Expected create <name> or feature <name>.');
+    if (commonFlag(args, 'schema')) {
+      final schema = invocationSchema(parser, command: command?.name);
+      reporter.data.addAll({'operation': 'schema', 'schema': schema});
+      reporter.info(jsonEncode(schema));
+      return reporter.finish();
+    }
+    if (args.rest.isNotEmpty ||
+        (command?.rest.length ?? 0) > (definition?.maximumPositionals ?? 0)) {
+      throw const FormatException(
+        'Expected create <name>, feature <name>, or init (without a name).',
+      );
     }
     final explicit = commonFlag(args, 'interactive');
     final disabled = commonFlag(args, 'no-interactive');
@@ -65,7 +87,8 @@ Future<int> runCli(
         '--interactive requires terminal stdin and stdout. Use --no-interactive with create <name> or feature <name> and explicit options.',
       );
     }
-    final missingName = command == null || command.rest.isEmpty;
+    final missingName =
+        command == null || command.rest.length < definition!.minimumPositionals;
     final interactive =
         explicit ||
         (!disabled &&
@@ -92,14 +115,17 @@ Future<int> runCli(
       out: out,
     );
     reporter.command = options.command;
-    final name = DartName.parse(options.name);
     final flutter =
         toolchain ?? SystemFlutterToolchain(output: reporter.json ? err : out);
+    if (options.command == 'init') {
+      return await initializeProject(options, cwd, reporter, flutter);
+    }
+    final name = DartName.parse(options.name);
     switch (options.command) {
       case 'create':
         return await _create(options, name, cwd, flutter, reporter);
       case 'feature':
-        return _feature(options, name, cwd, reporter);
+        return await _feature(options, name, cwd, reporter, flutter);
       default:
         throw const FormatException('Unknown command.');
     }
@@ -131,15 +157,19 @@ void _help(CliReporter reporter, ArgParser parser, String? command) {
     'Flutter Forge $version — feature-first Flutter scaffolding.\n',
   );
   if (command == null) {
+    String commandsWithNames(bool named) => cliCommands.commands.values
+        .where((command) => command.positionals.isNotEmpty == named)
+        .map((command) => '  ${command.usage.padRight(16)}${command.help}')
+        .join('\n');
     out.writeln(
       'Usage: flutter-forge <command> [options]\n'
-      '  create <name>   Create a new app in an absent directory.\n'
-      '  feature <name>  Generate a feature; registration remains manual.\n\n'
+      '${commandsWithNames(true)}\n\n'
+      '${commandsWithNames(false)}\n\n'
       '${parser.usage}\n\nUse flutter-forge <command> --help for command options.',
     );
   } else {
     out.writeln(
-      'Usage: flutter-forge $command <name> [options]\n'
+      'Usage: flutter-forge ${cliCommands.commands[command]!.usage} [options]\n'
       '${parser.commands[command]!.usage}',
     );
   }
@@ -163,7 +193,18 @@ Future<int> _create(
   FlutterToolchain flutter,
   CliReporter reporter,
 ) async {
-  validateAppName(name);
+  final recipe = Recipe.values.byName(args.recipe ?? 'clean');
+  final state = StateStyle.values.byName(args.state ?? 'cubit');
+  final profile = args.lintProfile == null || args.lintProfile == 'auto'
+      ? LintProfile.veryGood
+      : parseLintProfile(args.lintProfile!);
+  validateAppName(
+    name,
+    recipe: recipe,
+    profile: profile,
+    state: state,
+    infrastructure: true,
+  );
   final org = args.org;
   validateOrganization(org);
   final platforms = parsePlatforms(args.platforms);
@@ -184,6 +225,9 @@ Future<int> _create(
     'platforms': platforms,
     'pub': args.pub,
     'dryRun': args.dryRun,
+    'recipe': recipe.name,
+    'state': state.name,
+    'lintProfile': profile.configName,
   });
   if (FileSystemEntity.typeSync(target, followLinks: false) !=
       FileSystemEntityType.notFound) {
@@ -192,7 +236,12 @@ Future<int> _create(
       target,
     );
   }
-  final plan = appPlan(name);
+  final plan = appPlan(
+    name,
+    recipe: recipe,
+    lintProfile: profile,
+    state: state,
+  );
   final writer = FileWriter();
   writer.check(target, plan);
   final createArgs = [
@@ -208,6 +257,7 @@ Future<int> _create(
     target,
   ];
   reporter.data['flutterCreateArguments'] = createArgs;
+  reportGeneration(reporter, enabled: args.pub);
   if (args.dryRun) {
     reporter.data['plannedFiles'] = plan.files.keys.toList();
     reporter.info(
@@ -216,7 +266,9 @@ Future<int> _create(
     reporter.info('Flutter also supplies the selected platform scaffold.');
     _preview(reporter, target, plan);
     if (args.pub) {
-      reporter.info('Then: flutter pub get in $target');
+      reporter.info(
+        'Then: ${generationCommands.map((command) => 'flutter ${command.join(' ')}').join('; ')} in $target',
+      );
     }
     return reporter.finish();
   }
@@ -233,9 +285,10 @@ Future<int> _create(
     writer.writeFreshApp(target, plan);
     stage = 'flutter pub get';
     if (args.pub) {
-      await flutter.run(['pub', 'get'], workingDirectory: target);
+      await generateCode(flutter, target, reporter);
     }
   } on Exception catch (e) {
+    stage = reporter.data['failedStage'] as String? ?? stage;
     reporter.diagnostic('Failed during $stage: $e');
     final partial =
         FileSystemEntity.typeSync(target, followLinks: false) !=
@@ -243,17 +296,23 @@ Future<int> _create(
     reporter.data.addAll({
       'failedStage': stage,
       'partialOutput': partial,
-      'scaffoldComplete': stage == 'flutter pub get',
+      'scaffoldComplete':
+          stage != 'flutter create' && stage != 'writing the app scaffold',
     });
     if (partial) {
       reporter.diagnostic(
         'Partial output remains at $target. Nothing was rolled back or deleted. '
         'Inspect it before retrying; create requires an absent target.',
       );
-      if (stage == 'flutter pub get') {
-        reporter.data['retryArguments'] = ['flutter', 'pub', 'get'];
+      if (stage != 'flutter create' && stage != 'writing the app scaffold') {
+        reporter.data['retryArguments'] = [
+          'flutter',
+          ...generationCommands.firstWhere(
+            (command) => 'flutter ${command.join(' ')}' == stage,
+          ),
+        ];
         reporter.diagnostic(
-          'Scaffold is complete. Retry flutter pub get in $target.',
+          'Scaffold is complete. Retry $stage in $target, then the remaining required commands.',
         );
       }
     } else {
@@ -268,21 +327,88 @@ Future<int> _create(
   reporter.data['generatedFiles'] = plan.files.keys.toList();
   reporter.info('Created ${name.value} at $target.');
   if (!args.pub) {
-    reporter.info('Dependencies not fetched. Run flutter pub get in $target.');
+    reporter.info(
+      'Run the required commands above in $target before starting the app.',
+    );
   }
   return reporter.finish();
 }
 
-int _feature(
+Future<int> _feature(
   CommandOptions args,
   DartName name,
   String cwd,
   CliReporter reporter,
-) {
+  FlutterToolchain flutter,
+) async {
   final root = canonicalRoot(p.join(cwd, args.projectDir));
   final config = ProjectConfig.read(root);
-  final style = StateStyle.values.byName(args.state);
-  final plan = featurePlan(config.name, name, style: style);
+  final style = args.state == null
+      ? config.state
+      : StateStyle.values.byName(args.state!);
+  final recipe = args.recipe == null
+      ? config.recipe
+      : Recipe.values.byName(args.recipe!);
+  final profile = args.lintProfile == null
+      ? config.lintProfile
+      : ProjectConfig.resolveLint(root, args.lintProfile!);
+  validateAppName(
+    config.name,
+    recipe: recipe,
+    profile: profile,
+    state: style,
+    infrastructure: config.managed,
+  );
+  final artifact = config.managed
+      ? managedFeatureArtifact(
+          config.name,
+          name,
+          style: style,
+          recipe: recipe,
+          routePath: args.route ?? '/${name.value}',
+        )
+      : featureArtifact(
+          config.name,
+          name,
+          style: style,
+          recipe: recipe,
+          routePath: args.route,
+        );
+  var plan = artifact.plan;
+  final expected = <String, String>{};
+  if (config.managed) {
+    final feature = ManagedFeature(
+      name,
+      style,
+      recipe,
+      RoutePath.parse(args.route ?? '/${name.value}'),
+    );
+    if (config.features!.any(
+      (existing) =>
+          existing.name.value == name.value ||
+          existing.name.className == name.className ||
+          existing.route.value.toLowerCase() ==
+              feature.route.value.toLowerCase(),
+    )) {
+      throw const FormatException(
+        'Managed feature name, symbol, or route already registered.',
+      );
+    }
+    final next = [...config.features!, feature];
+    expected.addAll(managedIntegrationFiles(config.name, config.features!));
+    expected[configFileName] = config.encode();
+    plan = GenerationPlan({
+      ...plan.files,
+      ...managedIntegrationFiles(config.name, next),
+      configFileName: ProjectConfig(
+        config.name,
+        recipe: config.recipe,
+        lintProfile: config.lintProfile,
+        state: config.state,
+        features: next,
+      ).encode(),
+    }, absentDirectories: plan.absentDirectories);
+  }
   reporter.data.addAll({
     'operation': 'feature',
     'name': name.value,
@@ -290,27 +416,45 @@ int _feature(
     'state': style.name,
     'dryRun': args.dryRun,
     'registered': false,
-    'wiring': {
-      'routerFile': 'lib/app/router.dart',
-      'imports': [
-        "import '../features/${name.value}/${name.value}_route.dart';",
-        "import '../features/${name.value}/presentation/${name.value}_${style.name}.dart';",
-      ],
-      'routeEntry':
-          '${name.memberName}Route(create${name.className}${style == StateStyle.cubit ? 'Cubit' : 'Bloc'}: ${name.className}${style == StateStyle.cubit ? 'Cubit' : 'Bloc'}.new),',
-      'location': '/${name.value}',
-    },
+    'registrationStatus': config.managed ? 'planned' : 'manual',
+    'recipe': recipe.name,
+    'lintProfile': profile.configName,
+    'wiring': artifact.wiring.toJson(),
   });
+  final missing = MissingDependencies(
+    root,
+    recipe,
+    profile,
+    state: style,
+    infrastructure: config.managed,
+  );
+  reporter.data['missingDependencies'] = missing.toJson();
+  if (!missing.isEmpty) throw FormatException(missing.instructions);
   final writer = FileWriter();
-  writer.check(root, plan);
+  if (config.managed) {
+    checkCodegenOutputs(root, config.name);
+    writer.checkManaged(root, plan, expected);
+    reportGeneration(reporter, enabled: args.pub);
+  } else {
+    writer.check(root, plan);
+  }
   if (args.dryRun) {
     reporter.data['plannedFiles'] = plan.files.keys.toList();
     reporter.info('Dry run — no files or processes changed.');
+    reporter.data['updatedFiles'] = expected.keys.toList();
     _preview(reporter, root, plan);
-    reporter.info('Would generate, not register.');
+    reporter.info(
+      config.managed
+          ? 'Would generate and register routes and DI.'
+          : 'Would generate, not register.',
+    );
   } else {
     try {
-      writer.write(root, plan);
+      if (config.managed) {
+        writer.writeManaged(root, plan, expected);
+      } else {
+        writer.write(root, plan);
+      }
     } on FileSystemException catch (e) {
       reporter.data['partialOutput'] = true;
       throw FileSystemException(
@@ -319,10 +463,24 @@ int _feature(
         e.osError,
       );
     }
-    reporter.data['generatedFiles'] = plan.files.keys.toList();
-    reporter.info('Generated, not registered: ${name.value} (${style.name}).');
+    reporter.data['generatedFiles'] = plan.files.keys
+        .where((path) => !expected.containsKey(path))
+        .toList();
+    reporter.data['updatedFiles'] = expected.keys.toList();
+    reporter.data['registered'] = config.managed;
+    reporter.data['registrationStatus'] = config.managed
+        ? 'registered'
+        : 'manual';
+    if (config.managed && args.pub) {
+      reporter.data['partialOutput'] = true;
+      await generateCode(flutter, root, reporter);
+      reporter.data.remove('partialOutput');
+    }
+    reporter.info(
+      'Generated${config.managed ? ' and registered' : ', not registered'}: ${name.value} (${style.name}).',
+    );
   }
-  reporter.info(featureWiring(name, style));
+  if (!config.managed) reporter.info(artifact.wiring.text);
   return reporter.finish();
 }
 

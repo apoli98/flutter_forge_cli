@@ -1,70 +1,40 @@
 import 'package:args/args.dart';
 
-ArgParser cliParser() {
+import 'command_definitions.dart';
+
+ArgParser cliParser({CommandCatalog? definitions}) {
+  final catalog = definitions ?? cliCommands;
   final parser = ArgParser();
-  _common(parser);
-  final create = ArgParser();
-  _common(create);
-  create
-    ..addOption(
-      'org',
-      defaultsTo: 'com.example',
-      help: 'Reverse-domain organization.',
-    )
-    ..addOption(
-      'platforms',
-      defaultsTo: 'ios,android',
-      help: 'Comma-separated Flutter platforms.',
-    )
-    ..addOption(
-      'output',
-      defaultsTo: '.',
-      help: 'Existing parent directory of the new app.',
-    )
-    ..addFlag(
-      'pub',
-      defaultsTo: true,
-      help: 'Run flutter pub get after generation.',
-    );
-  parser.addCommand('create', create);
-  final feature = ArgParser();
-  _common(feature);
-  feature
-    ..addOption(
-      'project-dir',
-      defaultsTo: '.',
-      help: 'Flutter Forge project directory.',
-    )
-    ..addOption('state', defaultsTo: 'cubit', allowed: ['cubit', 'bloc']);
-  parser.addCommand('feature', feature);
+  _register(parser, catalog.commonOptions);
+  for (final command in catalog.commands.values) {
+    final child = ArgParser();
+    _register(child, [...catalog.commonOptions, ...command.options]);
+    parser.addCommand(command.name, child);
+  }
   return parser;
 }
 
-void _common(ArgParser parser) {
-  parser
-    ..addFlag('help', abbr: 'h', negatable: false, help: 'Show usage.')
-    ..addFlag('version', negatable: false, help: 'Show CLI version.')
-    ..addFlag(
-      'interactive',
-      negatable: false,
-      help:
-          'Collect omitted values in a terminal wizard; --no-interactive disables prompts.',
-    )
-    ..addFlag(
-      'no-interactive',
-      negatable: false,
-      help: 'Never prompt for input.',
-    )
-    ..addFlag(
-      'json',
-      negatable: false,
-      help: 'Emit one structured JSON result; never prompt.',
-    )
-    ..addFlag(
-      'dry-run',
-      negatable: false,
-      help: 'Validate and preview without writes or processes.',
-    );
+void _register(ArgParser parser, List<OptionDefinition> options) {
+  for (final option in options) {
+    switch (option.type) {
+      case ArgumentType.boolean:
+        parser.addFlag(
+          option.name,
+          abbr: option.abbr,
+          help: option.help,
+          defaultsTo: option.defaultValue as bool,
+          negatable: option.negatable,
+        );
+      case ArgumentType.string:
+        parser.addOption(
+          option.name,
+          abbr: option.abbr,
+          help: option.help,
+          defaultsTo: option.defaultValue as String?,
+          allowed: option.allowed,
+        );
+    }
+  }
 }
 
 bool commonFlag(ArgResults args, String name) =>
@@ -80,7 +50,11 @@ final class CommandOptions {
     this.output = '.',
     this.pub = true,
     this.projectDir = '.',
-    this.state = 'cubit',
+    this.state,
+    this.recipe,
+    this.lintProfile,
+    this.route,
+    this.scaffold = false,
   });
 
   final String command;
@@ -91,5 +65,9 @@ final class CommandOptions {
   final String output;
   final bool pub;
   final String projectDir;
-  final String state;
+  final String? state;
+  final String? recipe;
+  final String? lintProfile;
+  final String? route;
+  final bool scaffold;
 }

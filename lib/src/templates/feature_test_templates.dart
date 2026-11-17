@@ -12,8 +12,8 @@ Map<String, String> featureTests(
   final kind = style.name;
   final prefix = 'package:${package.value}/features/$n';
   final action = style == StateStyle.cubit
-      ? 'controller.increment();\n      controller.increment();'
-      : 'controller.add(const ${c}IncrementPressed());\n      controller.add(const ${c}IncrementPressed());';
+      ? 'controller..increment()..increment();'
+      : 'controller..add(const ${c}IncrementPressed())..add(const ${c}IncrementPressed());';
   return {
     'test/features/$n/${n}_${kind}_test.dart':
         '''import 'package:bloc_test/bloc_test.dart';
@@ -49,8 +49,7 @@ void main() {
   testWidgets('route injects, updates, and closes its controller', (tester) async {
     late $controller controller;
     final route = ${name.memberName}Route(create$controller: () {
-      controller = $controller(initialCount: 4);
-      return controller;
+      return controller = $controller(initialCount: 4);
     });
     final router = GoRouter(initialLocation: route.path, routes: [route]);
     await tester.pumpWidget(MaterialApp.router(routerConfig: router));

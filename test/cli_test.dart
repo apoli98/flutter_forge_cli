@@ -95,9 +95,9 @@ void main() {
   test(
     'create rejects every bundled dependency name before side effects',
     () async {
-      final pubspec =
-          loadYaml(appPlan(DartName.parse('demo')).files['pubspec.yaml']!)
-              as YamlMap;
+      final pubspec = loadYaml(
+        appPlan(DartName.parse('demo')).files['pubspec.yaml']!,
+      ) as YamlMap;
       final dependencyNames = [
         ...(pubspec['dependencies'] as YamlMap).keys.cast<String>(),
         ...(pubspec['dev_dependencies'] as YamlMap).keys.cast<String>(),
@@ -109,7 +109,7 @@ void main() {
           'go_router',
           'material_ui',
           'bloc_test',
-          'flutter_lints',
+          'very_good_analysis',
         ]),
       );
       for (final name in dependencyNames) {
@@ -144,9 +144,8 @@ void main() {
     ]) {
       expect(await run(['feature', name]), 0, reason: name);
       expect(
-        File(
-          p.join(temp.path, 'lib/features/$name/${name}_route.dart'),
-        ).existsSync(),
+        File(p.join(temp.path, 'lib/features/$name/${name}_route.dart'))
+            .existsSync(),
         isTrue,
       );
     }
@@ -196,7 +195,7 @@ void main() {
         0,
       );
       final root = p.join(parent.path, 'demo');
-      expect(flutter.calls, hasLength(2));
+      expect(flutter.calls, hasLength(5));
       expect(flutter.calls.first.args, [
         'create',
         '--empty',
@@ -210,7 +209,9 @@ void main() {
         root,
       ]);
       expect(flutter.calls.first.cwd, parent.path);
-      expect(flutter.calls.last.args, ['pub', 'get']);
+      expect(flutter.calls[1].args, ['pub', 'get']);
+      expect(flutter.calls[2].args, ['gen-l10n']);
+      expect(flutter.calls.last.args, ['pub', 'run', 'build_runner', 'build']);
       expect(flutter.calls.last.cwd, root);
       expect(
         File(p.join(root, 'web/index.html')).readAsStringSync(),
@@ -218,11 +219,11 @@ void main() {
       );
       expect(
         File(p.join(root, 'flutter_forge.yaml')).readAsStringSync(),
-        'schema_version: 1\npackage: demo\n',
+        'schema_version: 4\npackage: demo\nrecipe: clean\nlint_profile: very_good\nstate: cubit\nfeatures:\n  - name: home\n    state: cubit\n    recipe: clean\n    route: /\n',
       );
       expect(
         File(p.join(root, 'test/widget_test.dart')).readAsStringSync(),
-        contains('Count: 1'),
+        contains('Welcome to your app'),
       );
       expect(err.toString(), isEmpty);
     },
@@ -248,12 +249,10 @@ void main() {
       Directory(p.join(temp.path, 'existing_dir')).createSync();
       final names = ['demo', 'existing_dir'];
       if (!Platform.isWindows) {
-        Link(
-          p.join(temp.path, 'dangling'),
-        ).createSync(p.join(temp.path, 'absent'));
-        Link(
-          p.join(temp.path, 'alias'),
-        ).createSync(p.join(temp.path, 'existing_dir'));
+        Link(p.join(temp.path, 'dangling'))
+            .createSync(p.join(temp.path, 'absent'));
+        Link(p.join(temp.path, 'alias'))
+            .createSync(p.join(temp.path, 'existing_dir'));
         names.addAll(['dangling', 'alias']);
       }
       for (final name in names) {
@@ -358,59 +357,55 @@ void main() {
   });
 
   for (final kind in ['cubit', 'bloc']) {
-    test(
-      'generates a $kind feature without modifying existing project files',
-      () async {
-        writeProject(temp.path);
-        writeFile(temp.path, 'lib/app/router.dart', 'handwritten router');
-        final before = snapshot(temp.path);
-        expect(await run(['feature', 'order_history', '--state', kind]), 0);
-        expect(out.toString(), contains('Generated, not registered'));
-        expect(
-          out.toString(),
-          contains(
-            "import '../features/order_history/order_history_route.dart';",
+    test('generates a $kind feature without modifying existing project files', () async {
+      writeProject(temp.path);
+      writeFile(temp.path, 'lib/app/router.dart', 'handwritten router');
+      final before = snapshot(temp.path);
+      expect(await run(['feature', 'order_history', '--state', kind]), 0);
+      expect(out.toString(), contains('Generated, not registered'));
+      expect(
+        out.toString(),
+        contains(
+          "import 'package:demo/features/order_history/order_history_route.dart';",
+        ),
+      );
+      expect(
+        File(
+          p.join(
+            temp.path,
+            'lib/features/order_history/presentation/order_history_$kind.dart',
           ),
-        );
+        ).existsSync(),
+        isTrue,
+      );
+      expect(
+        File(
+          p.join(
+            temp.path,
+            'test/features/order_history/order_history_page_test.dart',
+          ),
+        ).existsSync(),
+        isTrue,
+      );
+      for (final entry in before.entries) {
         expect(
-          File(
-            p.join(
-              temp.path,
-              'lib/features/order_history/presentation/order_history_$kind.dart',
-            ),
-          ).existsSync(),
-          isTrue,
+          File(p.join(temp.path, entry.key)).readAsStringSync(),
+          entry.value,
         );
-        expect(
-          File(
-            p.join(
-              temp.path,
-              'test/features/order_history/order_history_page_test.dart',
-            ),
-          ).existsSync(),
-          isTrue,
-        );
-        for (final entry in before.entries) {
-          expect(
-            File(p.join(temp.path, entry.key)).readAsStringSync(),
-            entry.value,
-          );
-        }
-        expect(flutter.calls, isEmpty);
-        final generated = snapshot(temp.path);
-        expect(await run(['feature', 'order_history', '--state', kind]), 1);
-        expect(snapshot(temp.path), generated);
-      },
-    );
+      }
+      expect(flutter.calls, isEmpty);
+      final generated = snapshot(temp.path);
+      expect(await run(['feature', 'order_history', '--state', kind]), 1);
+      expect(snapshot(temp.path), generated);
+    });
   }
 
   test(
     'existing test directory blocks the whole feature before any writes',
     () async {
       writeProject(temp.path);
-      Directory(
-        p.join(temp.path, 'test/features/orders'),
-      ).createSync(recursive: true);
+      Directory(p.join(temp.path, 'test/features/orders'))
+          .createSync(recursive: true);
       final before = snapshot(temp.path);
       expect(await run(['feature', 'orders']), 1);
       expect(
