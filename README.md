@@ -1,154 +1,155 @@
 # Flutter Forge CLI
 
-Flutter Forge creates feature-first Flutter apps with Cubit, Bloc, Riverpod, or Provider. It adds clean data, domain, and presentation code and can adopt existing Flutter apps without changing their source. The installed command is `flutter-forge`. Version 0.1.0 is local-only and unpublished.
+**Create feature-first Flutter apps. Add features without repeating the setup.**
 
-## Create an app
+Flutter Forge generates apps and features with **Cubit, Bloc, Riverpod, or Provider**, plus routing, dependency injection, tests, and code generation. Start a new project or adopt an existing Flutter app.
 
-Use Flutter on your `PATH`. The CLI and generated code require Dart 3.14 or newer. Generated apps require Flutter 3.50 or newer. Verification uses Flutter 3.50.0 and Dart 3.14.0 on macOS.
+[Get started](#get-started) · [Add a feature](#3-add-a-feature) · [Command reference](docs/commands.md) · [Architecture](docs/architecture.md)
 
-From this repository:
+> **Early release · v0.1.0**
+> Install from this repository. Flutter Forge is not published on pub.dev.
+
+## Get started
+
+### 1. Install the CLI
+
+Requirements: **Dart 3.14+** and **Flutter 3.50+**, with `dart` and `flutter` on your `PATH`.
 
 ```sh
-dart pub get
-dart run bin/flutter_forge.dart create demo --state riverpod
-cd demo
+git clone https://github.com/apoli98/flutter_forge_cli.git
+cd flutter_forge_cli
+dart pub global activate --source path .
+flutter-forge --help
+```
+
+If `flutter-forge` is not found, add Dart's global executable directory to your `PATH`. The default on macOS and Linux is `$HOME/.pub-cache/bin`.
+
+### 2. Create an app
+
+From the directory where you want to keep your apps:
+
+```sh
+flutter-forge create my_app --state riverpod
+cd my_app
 flutter run
 ```
 
-The Home page displays `Welcome to your app`, supplied by `LocalHomeDatasource` at the app composition root. New apps default to iOS and Android, Cubit, the `clean` recipe, and `very_good_analysis`. Select `--state cubit|bloc|riverpod|provider` for the project default. Use `--lint-profile flutter` for Flutter lints, or `--recipe counter` for the counter demo.
+Creation resolves dependencies and runs localization and code generation. The generated Home page displays **Welcome to your app**.
 
-Every new app includes a configured Dio client with safe typed errors, app-level GetIt registrations, Freezed and JSON code generation, declared asset folders, and an English Flutter gen-l10n example. Creation runs dependency resolution and code generation. `--no-pub` prints the commands instead. No API endpoints or request logging are generated. Configure `API_BASE_URL` before using the client.
+Choose `--state cubit`, `--state bloc`, `--state riverpod`, or `--state provider`. New apps default to Cubit, iOS and Android, the `clean` recipe, and `very_good_analysis`.
 
-To install the command from the local checkout:
+To select another setup:
 
 ```sh
-dart pub global activate --source path .
-flutter-forge --help
-flutter-forge create my_app --state provider
+flutter-forge create counter_app --recipe counter --state bloc
+flutter-forge create web_app --platforms web --lint-profile flutter
 ```
 
-Add Dart's global executable directory to `PATH` if needed. No package has been published, so `dart pub global activate flutter_forge_cli` is not an installation option.
+Use `--dry-run` to preview without writes or subprocesses. Use `--no-pub` to generate files and print the dependency and code-generation commands without running them.
+
+### 3. Add a feature
+
+Inside your generated app:
+
+```sh
+flutter-forge feature orders
+flutter-forge feature activity --route /account/activity
+```
+
+Features inherit the project's state management. New Forge apps register their routes and dependencies automatically. Navigate to the generated route from your app; the CLI does not add navigation buttons.
+
+An explicit `--state` changes the backend for that feature only. Install any additional backend dependencies before generation. The CLI does not edit your pubspec when adding a feature.
+
+## What you get
+
+The default `clean` recipe separates each feature into data, domain, and presentation code, with constructor injection between layers.
+
+| Area | Generated setup |
+| --- | --- |
+| State management | Cubit, Bloc, Riverpod `Notifier`, or Provider `ChangeNotifier` |
+| Feature layers | Datasource contract, model, entity, repository, use case, controller, and page |
+| Navigation | GoRouter routes with feature-local state ownership |
+| Dependencies | App-level GetIt composition, without service lookups inside features |
+| Networking | Dio client with typed errors and an explicit base URL configuration |
+| Code generation | Freezed and JSON serialization |
+| App resources | English Flutter localizations and declared image and icon asset folders |
+| Tests | Generated feature tests and an app widget test |
+
+The starter datasource is local, not a pretend API integration. Replace it with your adapter at the app composition root. No API endpoints, credentials, or request logging are generated. Configure `API_BASE_URL` before using the network client.
+
+For a smaller increment demo, choose `--recipe counter`. See [generated app architecture](docs/architecture.md#generated-application) for ownership and dependency flow.
 
 ## Use the terminal wizard
 
 ```sh
 flutter-forge
-flutter-forge create
-flutter-forge feature --state bloc
-flutter-forge create my_app --interactive
 ```
 
-With terminal input and output, the first command offers create, feature, or init. A create or feature command without a name starts its wizard unless `CI` is set. The wizard asks for omitted values, shows the resolved command, and requires confirmation. Press Enter to accept a displayed default. The confirmation defaults to **no**.
+Choose a command, fill in omitted values, and review the resolved command before confirming. Confirmation defaults to **no**.
 
-Commands that include a name never prompt unless you pass `--interactive`. Use `--no-interactive` to prohibit prompts, including in a terminal. See the [interactive behavior reference](docs/commands.md#interactive-behavior) for CI rules and cancellation.
+You can also run `flutter-forge create` or `flutter-forge feature` without a name to start their wizards in a terminal. Commands with a name do not prompt unless you pass `--interactive`. Use `--no-interactive` for scripts, or `--json` for structured output.
 
 ## Adopt an existing app
 
-```sh
-cd /path/to/existing_flutter_app
-flutter-forge init --project-dir . --state riverpod --json
-```
-
-`init` reads the package name from `pubspec.yaml` and writes only an absent `flutter_forge.yaml`. It does not run Flutter or change the pubspec, lockfile, analysis options, router, core code, or DI. It detects a `very_good_analysis` include, otherwise it records Flutter lints. Override this with `--lint-profile flutter|very_good`.
-
-Read the missing-dependency warnings and run the exact `flutter pub add` commands manually in your app. Adoption succeeds with warnings, but feature generation refuses missing required dependencies before writing anything. The check covers direct declarations, not resolved versions or SDK compatibility. Existing apps need a compatible Dart SDK and their own datasource adapters. Generated code does not replace an existing domain model or shared failure contract.
-
-Use `flutter-forge init --interactive` for the name-free wizard or `--dry-run` to preview metadata without writes or processes. Repeating init refuses the existing metadata.
-
-For a full scaffold, use `init --scaffold` after declaring its required dependencies, `flutter.generate: true`, and asset directories in pubspec. This adds `lib/main_forge.dart` without replacing your entrypoint, dependency files, or lint configuration. Any occupied generated integration file stops the operation before writes. Run the adopted scaffold with `flutter run -t lib/main_forge.dart`. See the [init reference](docs/commands.md#init) for its preflight requirements.
-
-## Use from an agent or script
+From an existing Flutter project:
 
 ```sh
-flutter-forge --schema
-flutter-forge create --schema --json
-flutter-forge --json create my_app --state riverpod --dry-run
-flutter-forge create my_app --state provider --no-pub --json
-flutter-forge --json feature orders --project-dir /absolute/path/to/my_app --state bloc
+flutter-forge init --state riverpod
 ```
 
-`--json` never prompts. It writes exactly one JSON object to stdout, including on errors. Read `success`, `exitCode`, and the structured `data` fields. Flutter logs go to stderr. Feature results include `registered`, `registrationStatus`, `updatedFiles`, and manual wiring fields. The [JSON output reference](docs/commands.md#json-output) lists the fields and failure details.
+By default, `init` writes only `flutter_forge.yaml`. It does not change source, dependency files, or lint configuration. Follow any printed dependency-install commands before generating features. Metadata-only adoption requires manual route and dependency registration.
 
-The CLI builds its argument parsers from [`lib/src/cli/commands.json`](lib/src/cli/commands.json). This file defines commands, positional requirements, option types, defaults, and allowed values. Its `$schema` points to [`commands.schema.json`](lib/src/cli/commands.schema.json) for editor validation. After editing command definitions, run `dart run tool/generate_commands.dart` from the repository root and include the updated `commands.g.dart`. The embedded JSON works with `dart run`, global activation, and compiled executables, without reading source files at runtime.
+To add the full managed scaffold, use `init --scaffold` after completing its dependency and pubspec requirements. It adds `lib/main_forge.dart` without replacing your entrypoint. Read the [adoption requirements](docs/commands.md#init) before using this mode.
 
-`--schema` returns a Draft 2020-12 JSON Schema for invocation descriptions, derived from those definitions and their argument parsers. Add a command to restrict the schema. Without `--json`, the schema is the raw stdout object. With `--json`, it is in `data.schema`. For example:
-
-```json
-{"command":"create","name":"my_app","options":{"state":"riverpod","pub":false,"dry-run":true}}
-```
-
-This describes `flutter-forge create my_app --state riverpod --no-pub --dry-run`. Invocation JSON is for discovery and validation only, not accepted as CLI input. Schema validation does not replace runtime checks for reserved names, project state, dependencies, or filesystem safety. See the [invocation JSON Schema reference](docs/commands.md#invocation-json-schema) for option metadata and validation limits.
-
-## Generate a feature
-
-From the generated project:
+## Automate with JSON
 
 ```sh
-flutter-forge feature order_history
-flutter-forge feature activity --state bloc --route /account/activity
+flutter-forge create my_app --state riverpod --dry-run --json
+flutter-forge feature orders --project-dir /path/to/my_app --json
+flutter-forge --schema > commands.schema.json
 ```
 
-Without global activation, run the CLI from its checkout and pass the app directory:
+`--json` disables prompts and emits one JSON result on stdout, including handled errors. Read `success`, `exitCode`, `data`, and `error` instead of parsing terminal messages. Flutter subprocess logs go to stderr.
 
-```sh
-dart run bin/flutter_forge.dart feature order_history --project-dir /absolute/path/to/demo
-```
+`--schema` exports a Draft 2020-12 JSON Schema for command invocation descriptions. The CLI still takes command-line arguments, not JSON input.
 
-Features inherit the project's state choice. An explicit `--state` overrides it for that feature only. Install any override dependencies manually before generation. The CLI never changes your pubspec during feature generation.
+The CLI itself builds its parsers from [`commands.json`](lib/src/cli/commands.json), validated by [`commands.schema.json`](lib/src/cli/commands.schema.json). See the [JSON command definitions](docs/commands.md#json-command-definitions) and [JSON output reference](docs/commands.md#json-output).
 
-New schema-4 apps register features automatically in the Forge-managed router and DI files. The CLI compares both files with their expected generated contents before any write. An edit, missing file, duplicate route, collision, or symlink stops generation. Clean features get an explicitly named local datasource that you replace at the composition root when your adapter is ready. Editing managed composition files ends automatic registration until you restore their generated contents.
+## Know the safety boundaries
 
-To replace a local datasource without losing automatic registration, construct your adapter in app-owned `lib/app/app.dart`. Pass it to the existing `_services = createDependencies(...)` initialization through `homeDatasource`, `orderHistoryDatasource`, or the matching generated feature parameter. `dependencies.dart` stays unchanged. The [composition reference](docs/commands.md#create) describes these public overrides and the intentional refusal when CLI template versions drift.
+- New app targets and feature directories must be absent. There is no force-overwrite flag.
+- Automatic registration checks Forge-managed router and dependency files before writing. Edited, missing, or linked integration files stop generation.
+- Older metadata-only projects keep manual registration. Feature generation does not silently upgrade them.
+- Filesystem checks do not make writes atomic. An interrupted write or failed subprocess can leave partial output. Inspect it before retrying.
 
-Legacy schemas 1–3 print `Generated, not registered` and exact constructor wiring instead. For a legacy Cubit project named `demo`, the imports are:
+Keep custom datasource adapters in app-owned code and pass them through the generated composition API. See [composition overrides](docs/commands.md#create) and [failure behavior](docs/commands.md#exit-codes-and-interrupted-generation) before changing managed files.
 
-```dart
-import 'package:demo/features/order_history/data/datasources/order_history_datasource.dart';
-import 'package:demo/features/order_history/data/repositories/order_history_repository_impl.dart';
-import 'package:demo/features/order_history/domain/usecases/load_order_history.dart';
-import 'package:demo/features/order_history/order_history_route.dart';
-import 'package:demo/features/order_history/presentation/order_history_cubit.dart';
-```
+## Develop locally
 
-Implement `OrderHistoryDatasource.load()` in your adapter. Require `OrderHistoryDatasource orderHistoryDatasource` in your router factory and pass the adapter from the app composition root. Add this entry to the existing `GoRouter` routes list:
-
-```dart
-orderHistoryRoute(
-	createOrderHistoryCubit: () => OrderHistoryCubit(
-		LoadOrderHistory(OrderHistoryRepositoryImpl(orderHistoryDatasource)),
-	),
-),
-```
-
-Navigate with `context.go('/order_history')` from a widget that imports `package:go_router/go_router.dart`. The CLI does not add navigation buttons.
-
-The feature contains a datasource interface, a validated starter `id`/`title` model, an immutable entity, a repository, a use case, and loading, loaded, and failed states. Adapt the starter fields to your real domain. A known typed datasource exception becomes a feature-local `fpdart.Either` failure. Unexpected programming errors propagate. No remote endpoint, global GetIt lookup, or production adapter stub is generated. Tests supply fakes and cover failures, retry, and disposal.
-
-Riverpod generates a `Notifier<State>` with a route-local `ProviderScope` override and automatic disposal. No app-wide scope is required for the generated route. Provider generates a `ChangeNotifier` owned by the route's `ChangeNotifierProvider`. Both use the same clean domain/data layers as Cubit and Bloc.
-
-App package names cannot match required dependencies. Riverpod also reserves `riverpod`, the transitive package pinned by `flutter_riverpod`. Other backends do not reserve that name. Feature names remain independent of package exports, so `change` with Provider and `stream` with Riverpod are valid.
-
-New apps and explicit scaffold adoption use schema 4 with a typed feature registry. Metadata-only init keeps schema 3 and manual registration. Schemas 1 and 2 retain Cubit as their feature default. Schema 1 also keeps the counter recipe and Flutter lint profile. Legacy feature generation never upgrades metadata. Managed feature generation updates only the registry, router, DI, and new feature files. Static `--route` overrides work for both recipes and all four backends.
-
-Run the generated tests:
-
-```sh
-flutter analyze
-flutter test
-```
-
-See [command reference](docs/commands.md) for defaults and failure behavior, and [architecture](docs/architecture.md) for file ownership.
-
-## Verify the CLI
+From the repository root:
 
 ```sh
 dart pub get
-dart format --output=none --set-exit-if-changed bin lib test tool
 dart analyze --fatal-infos
 dart test
-dart run tool/verify_flutter.dart /absolute/path/to/existing/temp-parent
 ```
 
-The verification script retains disposable iOS and Android apps under the supplied parent. It covers all four backends, both recipes, and both lint profiles. It runs real Freezed, JSON, and localization generation, then checks automatic route navigation, DI registration, edited-file refusal, cross-backend wiring, business-name collisions, legacy metadata, and both adoption modes. It runs Flutter unit and widget tests, not device or web builds. It needs network access for uncached packages. On this machine the approved parent is `/private/var/folders/f7/wgd6hcg910383s9x8pbnzq200000gp/T/opencode`.
+After editing `lib/src/cli/commands.json`, regenerate its bundled copy:
 
-To rerun a failed portion without repeating completed apps, set `FORGE_VERIFY_FROM` to its printed app name, such as `verified_very_good_counter_cubit`. This starts a fresh partial run from that matrix selection, still checks legacy metadata and adoption, and labels its result as partial. `FORGE_VERIFY_FROM=legacy` runs only the compatibility and adoption checks.
+```sh
+dart run tool/generate_commands.dart
+```
+
+For end-to-end verification against Flutter, supply an existing temporary parent directory:
+
+```sh
+dart run tool/verify_flutter.dart /absolute/path/to/temp-parent
+```
+
+This creates and retains disposable apps, runs code generation, analysis, and tests, and needs network access for uncached dependencies. Verification targets Flutter 3.50.0 and Dart 3.14.0 on macOS.
+
+## Documentation
+
+- [Command reference](docs/commands.md): options, defaults, JSON contracts, adoption, and failure behavior.
+- [Architecture](docs/architecture.md): generated code, managed files, and CLI internals.
+- [Changelog](CHANGELOG.md): release changes.
